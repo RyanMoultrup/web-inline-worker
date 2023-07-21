@@ -18,13 +18,10 @@
  * 
  * @function workerize 
  * @param {workerFn} fn Function that will be stringified and ran in the Worker context.
- * @param {object} [workerOptions={}] Used to extend the native Worker constructor's options
  * @returns Workerized function
  * @throws
  */
-module.exports = function workerize (fn, workerOptions = {}) {
-  const { Worker } = require('worker_threads')
-  
+const workerize = function (fn) {
   /**
    * Workerized function
    * 
@@ -35,22 +32,27 @@ module.exports = function workerize (fn, workerOptions = {}) {
    */
   return function workerized (...workerData) {
     return new Promise((resolve, reject) => {
-      const worker = new Worker(`
+      const code = `
         const { workerData, parentPort } = require('worker_threads')
         Promise.resolve((${fn.toString()})(...workerData)).then(returnedData => {
           parentPort.postMessage(returnedData)
-        })
-      `, { ...workerOptions, eval: true, workerData })
-  
-      worker.on('message', resolve)
-      worker.on('error', reject)
-      worker.on('exit', code => {
-        if (code === 0) {
-          resolve(null)
-        } else {
-          reject(new Error(`Worker stopped with exit code ${code}`))
-        }
-      })
+        })`;
+
+      const blob = new Blob([code], { type: "application/javascript" });
+      const worker = new Worker(URL.createObjectURL(blob));
+
+      worker.onmessage = ({ data }) => {
+        resolve(data);
+        worker.terminate();
+      };
+      worker.onerror =({ data }) => {
+        console.error('Worker terminated with an error');
+        reject(data);
+        worker.terminate();
+      }
+      worker.postMessage(workerData);
     })
   }
 }
+
+export default workerize;
